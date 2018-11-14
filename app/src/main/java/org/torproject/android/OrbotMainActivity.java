@@ -3,38 +3,6 @@
 
 package org.torproject.android;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.UnsupportedEncodingException;
-import java.net.URLDecoder;
-import java.net.URLEncoder;
-import java.text.NumberFormat;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
-import java.util.StringTokenizer;
-
-import org.json.JSONArray;
-import org.torproject.android.service.OrbotConstants;
-import org.torproject.android.service.util.Prefs;
-import org.torproject.android.service.TorService;
-import org.torproject.android.service.TorServiceConstants;
-import org.torproject.android.service.util.TorServiceUtils;
-import org.torproject.android.settings.LocaleHelper;
-import org.torproject.android.settings.SettingsPreferences;
-import org.torproject.android.ui.AppManagerActivity;
-import org.torproject.android.ui.Rotate3dAnimation;
-import org.torproject.android.ui.onboarding.BridgeWizardActivity;
-import org.torproject.android.ui.onboarding.OnboardingActivity;
-import org.torproject.android.ui.hiddenservices.ClientCookiesActivity;
-import org.torproject.android.ui.hiddenservices.HiddenServicesActivity;
-import org.torproject.android.ui.hiddenservices.backup.BackupUtils;
-import org.torproject.android.ui.hiddenservices.permissions.PermissionManager;
-import org.torproject.android.ui.hiddenservices.providers.HSContentProvider;
-import org.torproject.android.vpn.VPNEnableActivity;
-
 import android.annotation.SuppressLint;
 import android.app.ActivityManager;
 import android.app.ActivityManager.RunningServiceInfo;
@@ -52,7 +20,6 @@ import android.content.SharedPreferences.Editor;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
-import android.content.pm.ResolveInfo;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
@@ -90,6 +57,38 @@ import android.widget.Toast;
 
 import com.google.zxing.integration.android.IntentIntegrator;
 import com.google.zxing.integration.android.IntentResult;
+import com.newrelic.agent.android.NewRelic;
+
+import org.json.JSONArray;
+import org.torproject.android.service.OrbotConstants;
+import org.torproject.android.service.TorService;
+import org.torproject.android.service.TorServiceConstants;
+import org.torproject.android.service.util.Prefs;
+import org.torproject.android.service.util.TorServiceUtils;
+import org.torproject.android.settings.LocaleHelper;
+import org.torproject.android.settings.SettingsPreferences;
+import org.torproject.android.ui.AppManagerActivity;
+import org.torproject.android.ui.Rotate3dAnimation;
+import org.torproject.android.ui.hiddenservices.ClientCookiesActivity;
+import org.torproject.android.ui.hiddenservices.HiddenServicesActivity;
+import org.torproject.android.ui.hiddenservices.backup.BackupUtils;
+import org.torproject.android.ui.hiddenservices.permissions.PermissionManager;
+import org.torproject.android.ui.hiddenservices.providers.HSContentProvider;
+import org.torproject.android.ui.onboarding.BridgeWizardActivity;
+import org.torproject.android.ui.onboarding.OnboardingActivity;
+import org.torproject.android.vpn.VPNEnableActivity;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.UnsupportedEncodingException;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
+import java.text.NumberFormat;
+import java.util.ArrayList;
+import java.util.Locale;
+import java.util.StringTokenizer;
 
 import pl.bclogic.pulsator4droid.library.PulsatorLayout;
 
@@ -98,132 +97,93 @@ import static android.support.v4.content.FileProvider.getUriForFile;
 public class OrbotMainActivity extends AppCompatActivity
         implements OrbotConstants, OnLongClickListener {
 
-    /* Useful UI bits */
-    private TextView lblStatus = null; //the main text display widget
-    private ImageView imgStatus = null; //the main touchable image for activating Orbot
-
-    private TextView downloadText = null;
-    private TextView uploadText = null;
-    private TextView mTxtOrbotLog = null;
-
-	private Button mBtnStart = null;
-
-	private SwitchCompat mBtnVPN = null;
-    private SwitchCompat mBtnBridges = null;
-    
-    private Spinner spnCountries = null;
-
-	private DrawerLayout mDrawer;
-
-    /* Some tracking bits */
-    private String torStatus = null; //latest status reported from the tor service
-    private Intent lastStatusIntent;  // the last ACTION_STATUS Intent received
-
-    private SharedPreferences mPrefs = null;
-
-    private boolean autoStartFromIntent = false;
-    
+    public final static String INTENT_ACTION_REQUEST_HIDDEN_SERVICE = "org.torproject.android.REQUEST_HS_PORT";
+    public final static String INTENT_ACTION_REQUEST_START_TOR = "org.torproject.android.START_TOR";
     private final static int REQUEST_VPN = 8888;
     private final static int REQUEST_SETTINGS = 0x9874;
     private final static int REQUEST_VPN_APPS_SELECT = 8889;
-
     private final static int LOG_DRAWER_GRAVITY = Gravity.END;
-
     // message types for mStatusUpdateHandler
     private final static int STATUS_UPDATE = 1;
     private static final int MESSAGE_TRAFFIC_COUNT = 2;
-
-	public final static String INTENT_ACTION_REQUEST_HIDDEN_SERVICE = "org.torproject.android.REQUEST_HS_PORT";
-	public final static String INTENT_ACTION_REQUEST_START_TOR = "org.torproject.android.START_TOR";
-
-
-    PulsatorLayout mPulsator;
-
-
-    //this is needed for backwards compat back to Android 2.3.*
-    @SuppressLint("NewApi")
-    public View onCreateView(View parent, String name, Context context, AttributeSet attrs)
-    {
-        if(Build.VERSION.SDK_INT >= 11)
-          return super.onCreateView(parent, name, context, attrs);
-        return null;
-    }
-
-    private void migratePreferences() {
-        String hsPortString = mPrefs.getString("pref_hs_ports", "");
-        if (hsPortString.length() > 0) {
-            StringTokenizer st = new StringTokenizer(hsPortString, ",");
-            ContentResolver cr = getContentResolver();
-            while (st.hasMoreTokens()) {
-                int hsPort = Integer.parseInt(st.nextToken().split(" ")[0]);
-                ContentValues fields = new ContentValues();
-                fields.put("name", hsPort);
-                fields.put("port", hsPort);
-                fields.put("onion_port", hsPort);
-                cr.insert(HSContentProvider.CONTENT_URI, fields);
-            }
-
-            Editor pEdit = mPrefs.edit();
-            pEdit.remove("pref_hs_ports");
-            pEdit.commit();
-        }
-    }
-
     /**
-     * Called when the activity is first created.
-     */
-    public void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
+     * private static final float ROTATE_FROM = 0.0f;
+     * private static final float ROTATE_TO = 360.0f*4f;// 3.141592654f * 32.0f;
+     * <p>
+     * public void spinOrbot (float direction)
+     * {
+     * sendIntentToService (TorServiceConstants.CMD_NEWNYM);
+     * <p>
+     * <p>
+     * Toast.makeText(this, R.string.newnym, Toast.LENGTH_SHORT).show();
+     * <p>
+     * //    Rotate3dAnimation rotation = new Rotate3dAnimation(ROTATE_FROM, ROTATE_TO*direction, Animation.RELATIVE_TO_SELF, 0.5f, Animation.RELATIVE_TO_SELF, 0.5f);
+     * Rotate3dAnimation rotation = new Rotate3dAnimation(ROTATE_FROM, ROTATE_TO*direction, imgStatus.getWidth()/2f,imgStatus.getWidth()/2f,20f,false);
+     * rotation.setFillAfter(true);
+     * rotation.setInterpolator(new AccelerateInterpolator());
+     * rotation.setDuration((long) 2*1000);
+     * rotation.setRepeatCount(0);
+     * imgStatus.startAnimation(rotation);
+     * <p>
+     * <p>
+     * }
+     **/
 
-        mPrefs = TorServiceUtils.getSharedPrefs(getApplicationContext());
+    private static final float ROTATE_FROM = 0.0f;
+    private static final float ROTATE_TO = 360.0f * 4f;// 3.141592654f * 32.0f;
+    PulsatorLayout mPulsator;
+    AlertDialog aDialog = null;
+    /* Useful UI bits */
+    private TextView lblStatus = null; //the main text display widget
+    private ImageView imgStatus = null; //the main touchable image for activating Orbot
+    private TextView downloadText = null;
+    private TextView uploadText = null;
+    private TextView mTxtOrbotLog = null;
+    private Button mBtnStart = null;
+    private SwitchCompat mBtnVPN = null;
+    private SwitchCompat mBtnBridges = null;
+    private Spinner spnCountries = null;
+    private DrawerLayout mDrawer;
+    /* Some tracking bits */
+    private String torStatus = null; //latest status reported from the tor service
+    private Intent lastStatusIntent;  // the last ACTION_STATUS Intent received
+    private SharedPreferences mPrefs = null;
+    private boolean autoStartFromIntent = false;
+    // this is what takes messages or values from the callback threads or other non-mainUI threads
+//and passes them back into the main UI thread for display to the user
+    private Handler mStatusUpdateHandler = new Handler() {
 
-        migratePreferences(); // Migrate old preferences
+        @Override
+        public void handleMessage(final Message msg) {
+            switch (msg.what) {
+                case MESSAGE_TRAFFIC_COUNT:
 
-        /* Create the widgets before registering for broadcasts to guarantee
-         * that the widgets exist when the status updates try to update them */
-    	doLayout();
+                    Bundle data = msg.getData();
+                    DataCount datacount = new DataCount(data.getLong("upload"), data.getLong("download"));
 
-    	/* receive the internal status broadcasts, which are separate from the public
-    	 * status broadcasts to prevent other apps from sending fake/wrong status
-    	 * info to this app */
-        LocalBroadcastManager lbm = LocalBroadcastManager.getInstance(this);
-        lbm.registerReceiver(mLocalBroadcastReceiver,
-                new IntentFilter(TorServiceConstants.ACTION_STATUS));
-        lbm.registerReceiver(mLocalBroadcastReceiver,
-                new IntentFilter(TorServiceConstants.LOCAL_ACTION_BANDWIDTH));
-        lbm.registerReceiver(mLocalBroadcastReceiver,
-                new IntentFilter(TorServiceConstants.LOCAL_ACTION_LOG));
+                    long totalRead = data.getLong("readTotal");
+                    long totalWrite = data.getLong("writeTotal");
 
-        boolean showFirstTime = mPrefs.getBoolean("connect_first_time", true);
+                    downloadText.setText(formatCount(datacount.Download) + " / " + formatTotal(totalRead));
+                    uploadText.setText(formatCount(datacount.Upload) + " / " + formatTotal(totalWrite));
 
-        if (showFirstTime)
-        {
-            Editor pEdit = mPrefs.edit();
-            pEdit.putBoolean("connect_first_time", false);
-            pEdit.commit();
-            startActivity(new Intent(this,OnboardingActivity.class));
+                    break;
+                default:
+                    String newTorStatus = msg.getData().getString("status");
+                    String log = (String) msg.obj;
+
+                    if (torStatus == null && newTorStatus != null) //first time status
+                    {
+                        findViewById(R.id.frameMain).setVisibility(View.VISIBLE);
+                        updateStatus(log, newTorStatus);
+
+                    } else
+                        updateStatus(log, newTorStatus);
+                    super.handleMessage(msg);
+                    break;
+            }
         }
-
-
-    }
-
-	private void sendIntentToService(final String action) {
-
-		Intent torService = new Intent(OrbotMainActivity.this, TorService.class);
-        torService.setAction(action);
-        startService(torService);
-
-	}
-
-    private void stopTor() {
-
-//        requestTorStatus();
-
-        Intent torService = new Intent(OrbotMainActivity.this, TorService.class);
-        stopService(torService);
-
-    }
-
+    };
     /**
      * The state and log info from {@link TorService} are sent to the UI here in
      * the form of a local broadcast. Regular broadcasts can be sent by any app,
@@ -261,7 +221,7 @@ public class OrbotMainActivity extends AppCompatActivity
 
             } else if (action.equals(TorServiceConstants.ACTION_STATUS)) {
                 lastStatusIntent = intent;
-                
+
                 Message msg = mStatusUpdateHandler.obtainMessage(STATUS_UPDATE);
                 msg.getData().putString("status", intent.getStringExtra(TorServiceConstants.EXTRA_STATUS));
 
@@ -269,21 +229,120 @@ public class OrbotMainActivity extends AppCompatActivity
             }
         }
     };
- 
-    private void doLayout ()
-    {
+
+    private static String readFromAssets(Context context, String filename) throws IOException {
+        BufferedReader reader = new BufferedReader(new InputStreamReader(context.getAssets().open(filename)));
+
+        // do reading, usually loop until end of file reading
+        StringBuilder sb = new StringBuilder();
+        String mLine = reader.readLine();
+        while (mLine != null) {
+            sb.append(mLine + '\n'); // process line
+            mLine = reader.readLine();
+        }
+        reader.close();
+        return sb.toString();
+    }
+
+    //this is needed for backwards compat back to Android 2.3.*
+    @SuppressLint("NewApi")
+    public View onCreateView(View parent, String name, Context context, AttributeSet attrs) {
+        if (Build.VERSION.SDK_INT >= 11)
+            return super.onCreateView(parent, name, context, attrs);
+        return null;
+    }
+
+    private void migratePreferences() {
+        String hsPortString = mPrefs.getString("pref_hs_ports", "");
+        if (hsPortString.length() > 0) {
+            StringTokenizer st = new StringTokenizer(hsPortString, ",");
+            ContentResolver cr = getContentResolver();
+            while (st.hasMoreTokens()) {
+                int hsPort = Integer.parseInt(st.nextToken().split(" ")[0]);
+                ContentValues fields = new ContentValues();
+                fields.put("name", hsPort);
+                fields.put("port", hsPort);
+                fields.put("onion_port", hsPort);
+                cr.insert(HSContentProvider.CONTENT_URI, fields);
+            }
+
+            Editor pEdit = mPrefs.edit();
+            pEdit.remove("pref_hs_ports");
+            pEdit.commit();
+        }
+    }
+
+    /**
+     * Called when the activity is first created.
+     */
+    public void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        NewRelic.withApplicationToken(
+                "AA2c451e6cf730e3fa76f7729ac1b3df28b1528314"
+        ).start(this.getApplication());
+
+        mPrefs = TorServiceUtils.getSharedPrefs(getApplicationContext());
+
+        migratePreferences(); // Migrate old preferences
+
+        /* Create the widgets before registering for broadcasts to guarantee
+         * that the widgets exist when the status updates try to update them */
+        doLayout();
+
+        /* receive the internal status broadcasts, which are separate from the public
+         * status broadcasts to prevent other apps from sending fake/wrong status
+         * info to this app */
+        LocalBroadcastManager lbm = LocalBroadcastManager.getInstance(this);
+        lbm.registerReceiver(mLocalBroadcastReceiver,
+                new IntentFilter(TorServiceConstants.ACTION_STATUS));
+        lbm.registerReceiver(mLocalBroadcastReceiver,
+                new IntentFilter(TorServiceConstants.LOCAL_ACTION_BANDWIDTH));
+        lbm.registerReceiver(mLocalBroadcastReceiver,
+                new IntentFilter(TorServiceConstants.LOCAL_ACTION_LOG));
+
+        boolean showFirstTime = mPrefs.getBoolean("connect_first_time", true);
+
+        if (showFirstTime) {
+            Editor pEdit = mPrefs.edit();
+            pEdit.putBoolean("connect_first_time", false);
+            pEdit.commit();
+            startActivity(new Intent(this, OnboardingActivity.class));
+        }
+
+
+    }
+
+    private void sendIntentToService(final String action) {
+
+        Intent torService = new Intent(OrbotMainActivity.this, TorService.class);
+        torService.setAction(action);
+        startService(torService);
+
+    }
+
+    private void stopTor() {
+
+//        requestTorStatus();
+
+        Intent torService = new Intent(OrbotMainActivity.this, TorService.class);
+        stopService(torService);
+
+    }
+
+    private void doLayout() {
         setContentView(R.layout.layout_main);
-        
+
         setTitle(R.string.app_name);
 
         Toolbar toolbar = (Toolbar) findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
-        
+
         mDrawer = (DrawerLayout) findViewById(R.id.drawer_layout);
 
-        mTxtOrbotLog = (TextView)findViewById(R.id.orbotLog);
-        
-        lblStatus = (TextView)findViewById(R.id.lblStatus);
+        mTxtOrbotLog = (TextView) findViewById(R.id.orbotLog);
+
+        lblStatus = (TextView) findViewById(R.id.lblStatus);
         lblStatus.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -291,87 +350,77 @@ public class OrbotMainActivity extends AppCompatActivity
             }
         });
 
-        imgStatus = (ImageView)findViewById(R.id.imgStatus);
+        imgStatus = (ImageView) findViewById(R.id.imgStatus);
         imgStatus.setOnLongClickListener(this);
 
-        downloadText = (TextView)findViewById(R.id.trafficDown);
-        uploadText = (TextView)findViewById(R.id.trafficUp);
+        downloadText = (TextView) findViewById(R.id.trafficDown);
+        uploadText = (TextView) findViewById(R.id.trafficUp);
 
         downloadText.setText(formatCount(0) + " / " + formatTotal(0));
         uploadText.setText(formatCount(0) + " / " + formatTotal(0));
 
-		mBtnStart =(Button)findViewById(R.id.btnStart);
-		mBtnStart.setOnClickListener(new View.OnClickListener()
-		{
-			@Override
-			public void onClick(View v) {
+        mBtnStart = (Button) findViewById(R.id.btnStart);
+        mBtnStart.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
 
-				if (torStatus == TorServiceConstants.STATUS_OFF) {
-					lblStatus.setText(getString(R.string.status_starting_up));
-					startTor();
-				} else {
-					lblStatus.setText(getString(R.string.status_shutting_down));
-					stopTor();
-				}
-			}
-		});
+                if (torStatus == TorServiceConstants.STATUS_OFF) {
+                    lblStatus.setText(getString(R.string.status_starting_up));
+                    startTor();
+                } else {
+                    lblStatus.setText(getString(R.string.status_shutting_down));
+                    stopTor();
+                }
+            }
+        });
 
-		mBtnVPN = (SwitchCompat)findViewById(R.id.btnVPN);
-		
-		boolean canDoVPN = Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH;
+        mBtnVPN = (SwitchCompat) findViewById(R.id.btnVPN);
 
-		if (!canDoVPN)
-		{
-			//if not SDK 14 or higher, we can't use the VPN feature
-			mBtnVPN.setVisibility(View.GONE);
-		}
-		else
-		{
-			boolean useVPN = Prefs.useVpn();
-			mBtnVPN.setChecked(useVPN);
-			
-			//auto start VPN if VPN is enabled
-			if (useVPN)
-			{
-				startActivity(new Intent(OrbotMainActivity.this,VPNEnableActivity.class));
-			}
-			
-			mBtnVPN.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener()
-            {
+        boolean canDoVPN = Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH;
+
+        if (!canDoVPN) {
+            //if not SDK 14 or higher, we can't use the VPN feature
+            mBtnVPN.setVisibility(View.GONE);
+        } else {
+            boolean useVPN = Prefs.useVpn();
+            mBtnVPN.setChecked(useVPN);
+
+            //auto start VPN if VPN is enabled
+            if (useVPN) {
+                startActivity(new Intent(OrbotMainActivity.this, VPNEnableActivity.class));
+            }
+
+            mBtnVPN.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
                 @Override
-                public void onCheckedChanged(CompoundButton buttonView, boolean isChecked)
-                {
+                public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
                     enableVPN(isChecked);
                 }
             });
 
-		}
+        }
 
-		mBtnBridges = (SwitchCompat)findViewById(R.id.btnBridges);
-		mBtnBridges.setChecked(Prefs.bridgesEnabled());
-		mBtnBridges.setOnClickListener(new View.OnClickListener ()
-		{
+        mBtnBridges = (SwitchCompat) findViewById(R.id.btnBridges);
+        mBtnBridges.setChecked(Prefs.bridgesEnabled());
+        mBtnBridges.setOnClickListener(new View.OnClickListener() {
 
-			@Override
-			public void onClick(View v) {
-				promptSetupBridges (); //if ARM processor, show all bridge options
-			}
+            @Override
+            public void onClick(View v) {
+                promptSetupBridges(); //if ARM processor, show all bridge options
+            }
 
-			
-		});
 
-        spnCountries = (Spinner)findViewById(R.id.spinnerCountry);
+        });
+
+        spnCountries = (Spinner) findViewById(R.id.spinnerCountry);
         setCountrySpinner();
 
         mPulsator = (PulsatorLayout) findViewById(R.id.pulsator);
 
     }
 
-    private void setCountrySpinner ()
-    {
+    private void setCountrySpinner() {
         String currentExit = Prefs.getExitNodes();
-        if (currentExit.length() > 4)
-        {
+        if (currentExit.length() > 4) {
             //someone put a complex value in, so let's disable
             ArrayList<String> cList = new ArrayList<String>();
             cList.add(0, currentExit);
@@ -379,8 +428,7 @@ public class OrbotMainActivity extends AppCompatActivity
             spnCountries.setAdapter(adapter);
 
             spnCountries.setEnabled(false);
-        }
-        else {
+        } else {
             int selIdx = -1;
 
             ArrayList<String> cList = new ArrayList<String>();
@@ -398,7 +446,7 @@ public class OrbotMainActivity extends AppCompatActivity
             spnCountries.setAdapter(adapter);
 
             if (selIdx > 0)
-                spnCountries.setSelection(selIdx,true);
+                spnCountries.setSelection(selIdx, true);
 
             spnCountries.setOnItemSelectedListener(new OnItemSelectedListener() {
 
@@ -441,10 +489,10 @@ public class OrbotMainActivity extends AppCompatActivity
         super.attachBaseContext(LocaleHelper.onAttach(base));
     }
 
-   /*
-    * Create the UI Options Menu (non-Javadoc)
-    * @see android.app.Activity#onCreateOptionsMenu(android.view.Menu)
-    */
+    /*
+     * Create the UI Options Menu (non-Javadoc)
+     * @see android.app.Activity#onCreateOptionsMenu(android.view.Menu)
+     */
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         super.onCreateOptionsMenu(menu);
@@ -452,113 +500,82 @@ public class OrbotMainActivity extends AppCompatActivity
         inflater.inflate(R.menu.orbot_main, menu);
         return true;
     }
-    
-    
 
     @Override
-	public boolean onOptionsItemSelected(MenuItem item) {
+    public boolean onOptionsItemSelected(MenuItem item) {
 
-        if (item.getItemId() == R.id.menu_newnym)
-        {
+        if (item.getItemId() == R.id.menu_newnym) {
             requestNewTorIdentity();
-        }
-    	 else if (item.getItemId() == R.id.menu_settings)
-         {
-             Intent intent = new Intent(OrbotMainActivity.this, SettingsPreferences.class);
-             startActivityForResult(intent, REQUEST_SETTINGS);
-         }
-         else if (item.getItemId() == R.id.menu_exit)
-         {
-                 //exit app
-                 doExit();
-                 
-         }
-         else if (item.getItemId() == R.id.menu_about)
-         {
-                 showAbout();
-                 
-                 
-         }
-         else if (item.getItemId() == R.id.menu_scan)
-         {
-         	IntentIntegrator integrator = new IntentIntegrator(OrbotMainActivity.this);
-         	integrator.initiateScan();
-         }
-         else if (item.getItemId() == R.id.menu_share_bridge)
-         {
-         	
-     		String bridges = Prefs.getBridgesList();
-         	
-     		if (bridges != null && bridges.length() > 0)
-     		{
-         		try {
-						bridges = "bridge://" + URLEncoder.encode(bridges,"UTF-8");
-	            		
-	                	IntentIntegrator integrator = new IntentIntegrator(OrbotMainActivity.this);
-	                	integrator.shareText(bridges);
-	                	
-					} catch (UnsupportedEncodingException e) {
-						// TODO Auto-generated catch block
-						e.printStackTrace();
-					}
-     		}
+        } else if (item.getItemId() == R.id.menu_settings) {
+            Intent intent = new Intent(OrbotMainActivity.this, SettingsPreferences.class);
+            startActivityForResult(intent, REQUEST_SETTINGS);
+        } else if (item.getItemId() == R.id.menu_exit) {
+            //exit app
+            doExit();
 
-         } else if (item.getItemId() == R.id.menu_hidden_services) {
-             startActivity(new Intent(this, HiddenServicesActivity.class));
-         } else if (item.getItemId() == R.id.menu_client_cookies) {
-             startActivity(new Intent(this, ClientCookiesActivity.class));
-         }
-     
-		return super.onOptionsItemSelected(item);
-	}
+        } else if (item.getItemId() == R.id.menu_about) {
+            showAbout();
 
-	private void showAbout ()
-        {
-                
-            LayoutInflater li = LayoutInflater.from(this);
-            View view = li.inflate(R.layout.layout_about, null); 
-            
-            String version = "";
-            
-            try {
-                version = getPackageManager().getPackageInfo(getPackageName(), 0).versionName + " (Tor " + TorService.TOR_VERSION + ")";
-            } catch (NameNotFoundException e) {
-                version = "Version Not Found";
+
+        } else if (item.getItemId() == R.id.menu_scan) {
+            IntentIntegrator integrator = new IntentIntegrator(OrbotMainActivity.this);
+            integrator.initiateScan();
+        } else if (item.getItemId() == R.id.menu_share_bridge) {
+
+            String bridges = Prefs.getBridgesList();
+
+            if (bridges != null && bridges.length() > 0) {
+                try {
+                    bridges = "bridge://" + URLEncoder.encode(bridges, "UTF-8");
+
+                    IntentIntegrator integrator = new IntentIntegrator(OrbotMainActivity.this);
+                    integrator.shareText(bridges);
+
+                } catch (UnsupportedEncodingException e) {
+                    // TODO Auto-generated catch block
+                    e.printStackTrace();
+                }
             }
-            
-            TextView versionName = (TextView)view.findViewById(R.id.versionName);
-            versionName.setText(version);
 
-            TextView aboutOther = (TextView)view.findViewById(R.id.aboutother);
-
-            try
-            {
-                String aboutText = readFromAssets(this,"LICENSE");
-                aboutText = aboutText.replace("\n","<br/>");
-                aboutOther.setText(Html.fromHtml(aboutText));
-            }
-            catch (Exception e){}
-            
-                    new AlertDialog.Builder(this)
-            .setTitle(getString(R.string.button_about))
-            .setView(view)
-            .show();
+        } else if (item.getItemId() == R.id.menu_hidden_services) {
+            startActivity(new Intent(this, HiddenServicesActivity.class));
+        } else if (item.getItemId() == R.id.menu_client_cookies) {
+            startActivity(new Intent(this, ClientCookiesActivity.class));
         }
 
-    private static String readFromAssets(Context context, String filename) throws IOException {
-        BufferedReader reader = new BufferedReader(new InputStreamReader(context.getAssets().open(filename)));
-
-        // do reading, usually loop until end of file reading
-        StringBuilder sb = new StringBuilder();
-        String mLine = reader.readLine();
-        while (mLine != null) {
-            sb.append(mLine + '\n'); // process line
-            mLine = reader.readLine();
-        }
-        reader.close();
-        return sb.toString();
+        return super.onOptionsItemSelected(item);
     }
 
+    private void showAbout() {
+
+        LayoutInflater li = LayoutInflater.from(this);
+        View view = li.inflate(R.layout.layout_about, null);
+
+        String version = "";
+
+        try {
+            version = getPackageManager().getPackageInfo(getPackageName(), 0).versionName + " (Tor " + TorService.TOR_VERSION + ")";
+        } catch (NameNotFoundException e) {
+            version = "Version Not Found";
+        }
+
+        TextView versionName = (TextView) view.findViewById(R.id.versionName);
+        versionName.setText(version);
+
+        TextView aboutOther = (TextView) view.findViewById(R.id.aboutother);
+
+        try {
+            String aboutText = readFromAssets(this, "LICENSE");
+            aboutText = aboutText.replace("\n", "<br/>");
+            aboutOther.setText(Html.fromHtml(aboutText));
+        } catch (Exception e) {
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.button_about))
+                .setView(view)
+                .show();
+    }
 
     /**
      * This is our attempt to REALLY exit Orbot, and stop the background service
@@ -574,40 +591,33 @@ public class OrbotMainActivity extends AppCompatActivity
         finish();
     }
 
-	protected void onPause() {
-		try
-		{
-			super.onPause();
-	
-			if (aDialog != null)
-				aDialog.dismiss();
-		}
-		catch (IllegalStateException ise)
-		{
-			//can happen on exit/shutdown
-		}
-	}
+    protected void onPause() {
+        try {
+            super.onPause();
 
+            if (aDialog != null)
+                aDialog.dismiss();
+        } catch (IllegalStateException ise) {
+            //can happen on exit/shutdown
+        }
+    }
 
     @Override
     public void onBackPressed() {
         // check to see if the log is open, if so close it
         if (mDrawer.isDrawerOpen(LOG_DRAWER_GRAVITY)) {
             mDrawer.closeDrawers();
-        }
-        else {
+        } else {
             super.onBackPressed();
         }
     }
 
-	private void refreshVPNApps ()
-    {
+    private void refreshVPNApps() {
         stopVpnService();
         startActivity(new Intent(OrbotMainActivity.this, VPNEnableActivity.class));
     }
 
-    private void enableVPN (boolean enable)
-    {
+    private void enableVPN(boolean enable) {
         Prefs.putUseVpn(enable);
 
         if (enable) {
@@ -697,7 +707,7 @@ public class OrbotMainActivity extends AppCompatActivity
                             onion.moveToNext();
                             hostname = onion.getString(onion.getColumnIndex(HSContentProvider.HiddenService.DOMAIN));
 
-                            if(hostname == null || hostname.length() < 1)
+                            if (hostname == null || hostname.length() < 1)
                                 continue;
 
                             nResult.putExtra("hs_host", hostname);
@@ -834,215 +844,177 @@ public class OrbotMainActivity extends AppCompatActivity
         enableBridges(true);
     }
 
-	/*
-	 * Launch the system activity for Uri viewing with the provided url
-	 */
-	private void openBrowser(final String browserLaunchUrl,boolean forceExternal, String pkgId)
-	{
+    /*
+     * Launch the system activity for Uri viewing with the provided url
+     */
+    private void openBrowser(final String browserLaunchUrl, boolean forceExternal, String pkgId) {
         boolean isBrowserInstalled = appInstalledOrNot(TorServiceConstants.BROWSER_APP_USERNAME);
 
-		if (pkgId != null)
-        {
-            startIntent(pkgId,Intent.ACTION_VIEW,Uri.parse(browserLaunchUrl));
+        if (pkgId != null) {
+            startIntent(pkgId, Intent.ACTION_VIEW, Uri.parse(browserLaunchUrl));
+        } else if (isBrowserInstalled) {
+            startIntent(TorServiceConstants.BROWSER_APP_USERNAME, Intent.ACTION_VIEW, Uri.parse(browserLaunchUrl));
+        } else if (mBtnVPN.isChecked() || forceExternal) {
+            //use the system browser since VPN is on
+            startIntent(null, Intent.ACTION_VIEW, Uri.parse(browserLaunchUrl));
         }
-        else if (isBrowserInstalled)
-        {
-            startIntent(TorServiceConstants.BROWSER_APP_USERNAME,Intent.ACTION_VIEW,Uri.parse(browserLaunchUrl));
-        }
-		else if (mBtnVPN.isChecked()||forceExternal)
-		{
-			//use the system browser since VPN is on
-			startIntent(null,Intent.ACTION_VIEW, Uri.parse(browserLaunchUrl));
-		}
-		
-	}
 
-	private void promptInstallOrfox ()
-    {
+    }
+
+    private void promptInstallOrfox() {
         AlertDialog aDialog = new AlertDialog.Builder(OrbotMainActivity.this)
                 .setTitle(R.string.install_apps_)
                 .setMessage(R.string.it_doesn_t_seem_like_you_have_orweb_installed_want_help_with_that_or_should_we_just_open_the_browser_)
-                .setPositiveButton(R.string.install_orweb, new Dialog.OnClickListener ()
-                {
+                .setPositiveButton(R.string.install_orweb, new Dialog.OnClickListener() {
 
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
 
-                        startActivity(OnboardingActivity.getInstallIntent(TorServiceConstants.BROWSER_APP_USERNAME,OrbotMainActivity.this));
+                        startActivity(OnboardingActivity.getInstallIntent(TorServiceConstants.BROWSER_APP_USERNAME, OrbotMainActivity.this));
 
 
                     }
 
                 })
-                .setNegativeButton(R.string.btn_cancel, new Dialog.OnClickListener ()
-                {
+                .setNegativeButton(R.string.btn_cancel, new Dialog.OnClickListener() {
 
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
-                            dialog.cancel();
+                        dialog.cancel();
                     }
 
                 })
                 .show();
     }
 
-
-    private void startIntent (String pkg, String action, Uri data)
-    {
+    private void startIntent(String pkg, String action, Uri data) {
         Intent i;
-		PackageManager pm = getPackageManager();
+        PackageManager pm = getPackageManager();
 
         try {
-			if (pkg != null) {
-				i = pm.getLaunchIntentForPackage(pkg);
-				if (i == null)
-					throw new PackageManager.NameNotFoundException();
-			}
-			else
-			{
-				i = new Intent();
-			}
+            if (pkg != null) {
+                i = pm.getLaunchIntentForPackage(pkg);
+                if (i == null)
+                    throw new PackageManager.NameNotFoundException();
+            } else {
+                i = new Intent();
+            }
 
             i.setAction(action);
             i.setData(data);
 
-			if (i.resolveActivity(pm)!=null)
-				startActivity(i);
+            if (i.resolveActivity(pm) != null)
+                startActivity(i);
 
         } catch (PackageManager.NameNotFoundException e) {
 
         }
     }
-    
-    private boolean appInstalledOrNot(String uri)
-    {
+
+    private boolean appInstalledOrNot(String uri) {
         PackageManager pm = getPackageManager();
-        try
-        {
-               PackageInfo pi = pm.getPackageInfo(uri, PackageManager.GET_ACTIVITIES);               
-               return pi.applicationInfo.enabled;
+        try {
+            PackageInfo pi = pm.getPackageInfo(uri, PackageManager.GET_ACTIVITIES);
+            return pi.applicationInfo.enabled;
+        } catch (PackageManager.NameNotFoundException e) {
+            return false;
         }
-        catch (PackageManager.NameNotFoundException e)
-        {
-              return false;
-        }
-   }    
-    
+    }
+
     @Override
     protected void onActivityResult(int request, int response, Intent data) {
         super.onActivityResult(request, response, data);
 
-        if (request == REQUEST_SETTINGS && response == RESULT_OK)
-        {
+        if (request == REQUEST_SETTINGS && response == RESULT_OK) {
             if (data != null && (!TextUtils.isEmpty(data.getStringExtra("locale")))) {
                 LocaleHelper.setLocale(getApplicationContext(), Prefs.getDefaultLocale());
                 finish();
-                startActivity(new Intent(this,OrbotMainActivity.class));
+                startActivity(new Intent(this, OrbotMainActivity.class));
             }
-        }
-        else if (request == REQUEST_VPN)
-        {
-			if (response == RESULT_OK) {
+        } else if (request == REQUEST_VPN) {
+            if (response == RESULT_OK) {
                 sendIntentToService(TorServiceConstants.CMD_VPN);
+            } else {
+                Prefs.putUseVpn(false);
             }
-			else
-			{
-				Prefs.putUseVpn(false);
-			}
-        }
-        else if (request == REQUEST_VPN_APPS_SELECT)
-        {
+        } else if (request == REQUEST_VPN_APPS_SELECT) {
             if (response == RESULT_OK &&
                     torStatus == TorServiceConstants.STATUS_ON)
                 refreshVPNApps();
 
         }
-        
+
         IntentResult scanResult = IntentIntegrator.parseActivityResult(request, response, data);
         if (scanResult != null) {
-             // handle scan result
-        	
-        	String results = scanResult.getContents();
-        	
-        	if (results != null && results.length() > 0)
-        	{
-	        	try {
-					
-					int urlIdx = results.indexOf("://");
-					
-					if (urlIdx!=-1)
-					{
-						results = URLDecoder.decode(results, "UTF-8");
-						results = results.substring(urlIdx+3);
+            // handle scan result
 
-						showAlert(getString(R.string.bridges_updated),getString(R.string.restart_orbot_to_use_this_bridge_) + results,false);	
-						
-						setNewBridges(results);
-					}
-					else
-					{
-						JSONArray bridgeJson = new JSONArray(results);
-						StringBuffer bridgeLines = new StringBuffer();
-						
-						for (int i = 0; i < bridgeJson.length(); i++)
-						{
-							String bridgeLine = bridgeJson.getString(i);
-							bridgeLines.append(bridgeLine).append("\n");
-						}
-						
-						setNewBridges(bridgeLines.toString());
-					}
-					
-					
-				} catch (Exception e) {
-					Log.e(TAG,"unsupported",e);
-				}
-        	}
-        	
-          }
-        
+            String results = scanResult.getContents();
+
+            if (results != null && results.length() > 0) {
+                try {
+
+                    int urlIdx = results.indexOf("://");
+
+                    if (urlIdx != -1) {
+                        results = URLDecoder.decode(results, "UTF-8");
+                        results = results.substring(urlIdx + 3);
+
+                        showAlert(getString(R.string.bridges_updated), getString(R.string.restart_orbot_to_use_this_bridge_) + results, false);
+
+                        setNewBridges(results);
+                    } else {
+                        JSONArray bridgeJson = new JSONArray(results);
+                        StringBuffer bridgeLines = new StringBuffer();
+
+                        for (int i = 0; i < bridgeJson.length(); i++) {
+                            String bridgeLine = bridgeJson.getString(i);
+                            bridgeLines.append(bridgeLine).append("\n");
+                        }
+
+                        setNewBridges(bridgeLines.toString());
+                    }
+
+
+                } catch (Exception e) {
+                    Log.e(TAG, "unsupported", e);
+                }
+            }
+
+        }
+
     }
-    
-    public void promptSetupBridges ()
-    {
 
-        if (mBtnBridges.isChecked())
-        {
+    public void promptSetupBridges() {
+
+        if (mBtnBridges.isChecked()) {
             Prefs.putBridgesEnabled(true);
             startActivity(new Intent(this, BridgeWizardActivity.class));
+        } else {
+            enableBridges(false);
         }
-        else
-        {
-        	enableBridges(false);
-        }
-        
+
     }
-    
 
-    private void enableBridges (boolean enable)
-    {
-		Prefs.putBridgesEnabled(enable);
+    private void enableBridges(boolean enable) {
+        Prefs.putBridgesEnabled(enable);
 
-		if (torStatus == TorServiceConstants.STATUS_ON)
-		{
-			String bridgeList = Prefs.getBridgesList();
-			if (bridgeList != null && bridgeList.length() > 0)
-			{
-				requestTorRereadConfig ();
-			}
-		}
+        if (torStatus == TorServiceConstants.STATUS_ON) {
+            String bridgeList = Prefs.getBridgesList();
+            if (bridgeList != null && bridgeList.length() > 0) {
+                requestTorRereadConfig();
+            }
+        }
     }
 
     private void requestTorRereadConfig() {
         sendIntentToService(TorServiceConstants.CMD_SIGNAL_HUP);
     }
-    
-    public void stopVpnService ()
-    {    	
+
+    public void stopVpnService() {
         sendIntentToService(TorServiceConstants.CMD_VPN_CLEAR);
     }
 
-       @Override
+    @Override
     protected void onResume() {
         super.onResume();
 
@@ -1051,60 +1023,52 @@ public class OrbotMainActivity extends AppCompatActivity
 
         setCountrySpinner();
 
-		requestTorStatus();
+        requestTorStatus();
 
-		if (torStatus == null)
-		    updateStatus("", TorServiceConstants.STATUS_STOPPING);
+        if (torStatus == null)
+            updateStatus("", TorServiceConstants.STATUS_STOPPING);
         else
             updateStatus(null, torStatus);
 
-           if (Prefs.useTransparentProxying())
-           {
-               showAlert(getString(R.string.no_transproxy_warning_short),getString(R.string.no_transproxy_warning),true);
-               Prefs.disableTransparentProxying();
-           }
+        if (Prefs.useTransparentProxying()) {
+            showAlert(getString(R.string.no_transproxy_warning_short), getString(R.string.no_transproxy_warning), true);
+            Prefs.disableTransparentProxying();
+        }
 
-           addAppShortcuts();
+        addAppShortcuts();
 
-           //now you can handle the intents properly
-           handleIntents();
+        //now you can handle the intents properly
+        handleIntents();
 
-       }
+    }
 
-    AlertDialog aDialog = null;
-    
     //general alert dialog for mostly Tor warning messages
     //sometimes this can go haywire or crazy with too many error
     //messages from Tor, and the user cannot stop or exit Orbot
     //so need to ensure repeated error messages are not spamming this method
-    private void showAlert(String title, String msg, boolean button)
-    {
-            try
-            {
-                    if (aDialog != null && aDialog.isShowing())
-                            aDialog.dismiss();
-            }
-            catch (Exception e){} //swallow any errors
-            
-             if (button)
-             {
-                            aDialog = new AlertDialog.Builder(OrbotMainActivity.this)
-                     .setIcon(R.drawable.onion32)
-             .setTitle(title)
-             .setMessage(msg)
-             .setPositiveButton(R.string.btn_okay, null)
-             .show();
-             }
-             else
-             {
-                     aDialog = new AlertDialog.Builder(OrbotMainActivity.this)
-                     .setIcon(R.drawable.onion32)
-             .setTitle(title)
-             .setMessage(msg)
-             .show();
-             }
-    
-             aDialog.setCanceledOnTouchOutside(true);
+    private void showAlert(String title, String msg, boolean button) {
+        try {
+            if (aDialog != null && aDialog.isShowing())
+                aDialog.dismiss();
+        } catch (Exception e) {
+        } //swallow any errors
+
+        if (button) {
+            aDialog = new AlertDialog.Builder(OrbotMainActivity.this)
+                    .setIcon(R.drawable.onion32)
+                    .setTitle(title)
+                    .setMessage(msg)
+                    .setPositiveButton(R.string.btn_okay, null)
+                    .show();
+        } else {
+            aDialog = new AlertDialog.Builder(OrbotMainActivity.this)
+                    .setIcon(R.drawable.onion32)
+                    .setTitle(title)
+                    .setMessage(msg)
+                    .show();
+        }
+
+        aDialog.setCanceledOnTouchOutside(true);
     }
 
     /**
@@ -1113,8 +1077,7 @@ public class OrbotMainActivity extends AppCompatActivity
      */
     private synchronized void updateStatus(String torServiceMsg, String newTorStatus) {
 
-        if (!TextUtils.isEmpty(torServiceMsg))
-        {
+        if (!TextUtils.isEmpty(torServiceMsg)) {
             if (torServiceMsg.contains(TorServiceConstants.LOG_NOTICE_HEADER)) {
                 lblStatus.setText(torServiceMsg);
             }
@@ -1126,12 +1089,11 @@ public class OrbotMainActivity extends AppCompatActivity
         if (torStatus == null || newTorStatus.equals(torStatus)) {
             torStatus = newTorStatus;
             return;
-        }
-    	else
-    	    torStatus = newTorStatus;
+        } else
+            torStatus = newTorStatus;
 
         if (torStatus == TorServiceConstants.STATUS_ON) {
-        	
+
             imgStatus.setImageResource(R.drawable.toron);
 
             mBtnStart.setText(R.string.menu_stop);
@@ -1139,8 +1101,7 @@ public class OrbotMainActivity extends AppCompatActivity
 
             lblStatus.setText(getString(R.string.status_activated));
 
-            if (autoStartFromIntent)
-            {
+            if (autoStartFromIntent) {
                 autoStartFromIntent = false;
                 Intent resultIntent = lastStatusIntent;
 
@@ -1149,7 +1110,7 @@ public class OrbotMainActivity extends AppCompatActivity
 
                 resultIntent.putExtra(
                         TorServiceConstants.EXTRA_STATUS,
-                        torStatus == null?TorServiceConstants.STATUS_OFF:torStatus
+                        torStatus == null ? TorServiceConstants.STATUS_OFF : torStatus
                 );
 
                 setResult(RESULT_OK, resultIntent);
@@ -1157,28 +1118,25 @@ public class OrbotMainActivity extends AppCompatActivity
                 finish();
                 Log.d(TAG, "autoStartFromIntent finish");
             }
-            
-            
+
 
         } else if (torStatus == TorServiceConstants.STATUS_STARTING) {
 
             imgStatus.setImageResource(R.drawable.torstarting);
 
-            if (torServiceMsg != null)
-            {
-            	if (torServiceMsg.contains(TorServiceConstants.LOG_NOTICE_BOOTSTRAPPED))
-            		lblStatus.setText(torServiceMsg);            	            
-            }
-            else
-            	lblStatus.setText(getString(R.string.status_starting_up));
+            if (torServiceMsg != null) {
+                if (torServiceMsg.contains(TorServiceConstants.LOG_NOTICE_BOOTSTRAPPED))
+                    lblStatus.setText(torServiceMsg);
+            } else
+                lblStatus.setText(getString(R.string.status_starting_up));
 
-			mBtnStart.setText("...");
+            mBtnStart.setText("...");
 
         } else if (torStatus == TorServiceConstants.STATUS_STOPPING) {
 
-        	  if (torServiceMsg != null && torServiceMsg.contains(TorServiceConstants.LOG_NOTICE_HEADER))
-              	lblStatus.setText(torServiceMsg);	
-        	  
+            if (torServiceMsg != null && torServiceMsg.contains(TorServiceConstants.LOG_NOTICE_HEADER))
+                lblStatus.setText(torServiceMsg);
+
             imgStatus.setImageResource(R.drawable.torstarting);
             lblStatus.setText(torServiceMsg);
 
@@ -1186,7 +1144,7 @@ public class OrbotMainActivity extends AppCompatActivity
 
             imgStatus.setImageResource(R.drawable.toroff);
             lblStatus.setText("Tor v" + TorService.TOR_VERSION);
-			mBtnStart.setText(R.string.menu_start);
+            mBtnStart.setText(R.string.menu_start);
             mPulsator.start();
 
         }
@@ -1203,7 +1161,7 @@ public class OrbotMainActivity extends AppCompatActivity
         sendIntentToService(TorServiceConstants.ACTION_START);
         mTxtOrbotLog.setText("");
     }
-    
+
     /**
      * Request tor status without starting it
      * {@link TorServiceConstants#ACTION_START} {@link Intent} to
@@ -1229,74 +1187,22 @@ public class OrbotMainActivity extends AppCompatActivity
             lblStatus.setText(getString(R.string.status_starting_up));
             startTor();
         } else {
-        	lblStatus.setText(getString(R.string.status_shutting_down));
-        	
+            lblStatus.setText(getString(R.string.status_shutting_down));
+
             stopTor();
         }
-        
+
         return true;
-                
+
     }
-
-// this is what takes messages or values from the callback threads or other non-mainUI threads
-//and passes them back into the main UI thread for display to the user
-    private Handler mStatusUpdateHandler = new Handler() {
-
-        @Override
-        public void handleMessage(final Message msg) {
-        	
-
-
-            switch (msg.what) {
-                case MESSAGE_TRAFFIC_COUNT:
-
-                    Bundle data = msg.getData();
-                    DataCount datacount =  new DataCount(data.getLong("upload"),data.getLong("download"));     
-                    
-                    long totalRead = data.getLong("readTotal");
-                    long totalWrite = data.getLong("writeTotal");
-                
-                    downloadText.setText(formatCount(datacount.Download) + " / " + formatTotal(totalRead));
-                    uploadText.setText(formatCount(datacount.Upload) + " / " + formatTotal(totalWrite));
-
-                    break;
-                default:
-                    String newTorStatus = msg.getData().getString("status");
-                    String log = (String)msg.obj;
-
-                    if (torStatus == null && newTorStatus != null) //first time status
-                    {
-                        findViewById(R.id.frameMain).setVisibility(View.VISIBLE);
-                        updateStatus(log, newTorStatus);
-
-                    }
-                    else
-                        updateStatus(log, newTorStatus);
-                    super.handleMessage(msg);
-                    break;
-            }
-        }
-    };
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
-          LocalBroadcastManager.getInstance(this).unregisterReceiver(mLocalBroadcastReceiver);
+        LocalBroadcastManager.getInstance(this).unregisterReceiver(mLocalBroadcastReceiver);
 
     }
 
-    public class DataCount {
-           // data uploaded
-           public long Upload;
-           // data downloaded
-           public long Download;
-           
-           DataCount(long Upload, long Download){
-               this.Upload = Upload;
-               this.Download = Download;
-           }
-       }
-       
     private String formatCount(long count) {
         NumberFormat numberFormat = NumberFormat.getInstance(Locale.getDefault());
         // Converts the supplied argument into a string.
@@ -1325,47 +1231,20 @@ public class OrbotMainActivity extends AppCompatActivity
                     + getString(R.string.mb);
     }
 
-    /**
-      private static final float ROTATE_FROM = 0.0f;
-        private static final float ROTATE_TO = 360.0f*4f;// 3.141592654f * 32.0f;
+    private void requestNewTorIdentity() {
+        sendIntentToService(TorServiceConstants.CMD_NEWNYM);
 
-    public void spinOrbot (float direction)
-    {
-            sendIntentToService (TorServiceConstants.CMD_NEWNYM);
-        
-        
-            Toast.makeText(this, R.string.newnym, Toast.LENGTH_SHORT).show();
-            
-        //    Rotate3dAnimation rotation = new Rotate3dAnimation(ROTATE_FROM, ROTATE_TO*direction, Animation.RELATIVE_TO_SELF, 0.5f, Animation.RELATIVE_TO_SELF, 0.5f);
-             Rotate3dAnimation rotation = new Rotate3dAnimation(ROTATE_FROM, ROTATE_TO*direction, imgStatus.getWidth()/2f,imgStatus.getWidth()/2f,20f,false);
-             rotation.setFillAfter(true);
-              rotation.setInterpolator(new AccelerateInterpolator());
-              rotation.setDuration((long) 2*1000);
-              rotation.setRepeatCount(0);
-              imgStatus.startAnimation(rotation);
-              
-        
-    }**/
-
-    private static final float ROTATE_FROM = 0.0f;
-    private static final float ROTATE_TO = 360.0f*4f;// 3.141592654f * 32.0f;
-
-    private void requestNewTorIdentity ()
-    {
-        sendIntentToService (TorServiceConstants.CMD_NEWNYM);
-
-        Rotate3dAnimation rotation = new Rotate3dAnimation(ROTATE_FROM, ROTATE_TO, imgStatus.getWidth()/2f,imgStatus.getWidth()/2f,20f,false);
+        Rotate3dAnimation rotation = new Rotate3dAnimation(ROTATE_FROM, ROTATE_TO, imgStatus.getWidth() / 2f, imgStatus.getWidth() / 2f, 20f, false);
         rotation.setFillAfter(true);
         rotation.setInterpolator(new AccelerateInterpolator());
-        rotation.setDuration((long) 2*1000);
+        rotation.setDuration((long) 2 * 1000);
         rotation.setRepeatCount(0);
         imgStatus.startAnimation(rotation);
         lblStatus.setText(getString(R.string.newnym));
     }
 
-    private void addAppShortcuts ()
-    {
-        LinearLayout llBoxShortcuts = (LinearLayout)findViewById(R.id.boxAppShortcuts);
+    private void addAppShortcuts() {
+        LinearLayout llBoxShortcuts = (LinearLayout) findViewById(R.id.boxAppShortcuts);
 
         PackageManager pMgr = getPackageManager();
 
@@ -1386,13 +1265,11 @@ public class OrbotMainActivity extends AppCompatActivity
                     if (!appInstalledOrNot(TorServiceConstants.BROWSER_APP_USERNAME))
                         promptInstallOrfox();
                     else
-                        openBrowser(URL_TOR_CHECK,false, TorServiceConstants.BROWSER_APP_USERNAME);
+                        openBrowser(URL_TOR_CHECK, false, TorServiceConstants.BROWSER_APP_USERNAME);
 
                 }
             });
-        }
-        catch (Exception e)
-        {
+        } catch (Exception e) {
             //package not installed?
         }
 
@@ -1438,9 +1315,7 @@ public class OrbotMainActivity extends AppCompatActivity
 
 
                 }
-            }
-            else
-            {
+            } else {
                 TextView tv = new TextView(this);
                 LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
                 params.setMargins(12, 3, 3, 3);
@@ -1465,6 +1340,18 @@ public class OrbotMainActivity extends AppCompatActivity
             });
         }
 
+    }
+
+    public class DataCount {
+        // data uploaded
+        public long Upload;
+        // data downloaded
+        public long Download;
+
+        DataCount(long Upload, long Download) {
+            this.Upload = Upload;
+            this.Download = Download;
+        }
     }
 
 }

@@ -1,8 +1,6 @@
-
 package org.torproject.android;
 
 import android.annotation.SuppressLint;
-import android.annotation.TargetApi;
 import android.app.Activity;
 import android.app.Application;
 import android.app.Notification;
@@ -12,41 +10,49 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
-import android.net.VpnService;
-import android.os.Build;
 import android.support.v4.app.NotificationCompat;
-import android.util.Log;
-import android.widget.RemoteViews;
 
 import com.github.javiersantos.appupdater.AppUpdater;
 import com.github.javiersantos.appupdater.enums.Display;
 import com.github.javiersantos.appupdater.enums.UpdateFrom;
 
 import org.torproject.android.service.OrbotConstants;
-import org.torproject.android.service.TorEventHandler;
-import org.torproject.android.service.TorService;
 import org.torproject.android.service.util.Prefs;
-
 import org.torproject.android.settings.Languages;
 import org.torproject.android.settings.LocaleHelper;
 
 import java.util.Locale;
-import java.util.Set;
 
 import im.delight.android.languages.Language;
 
-public class OrbotApp extends Application implements OrbotConstants
-{
+public class OrbotApp extends Application implements OrbotConstants {
 
     private Locale locale;
+
+    /**
+     * public static void forceChangeLanguage(Activity activity) {
+     * Intent intent = activity.getIntent();
+     * if (intent == null) // when launched as LAUNCHER
+     * intent = new Intent(activity, OrbotMainActivity.class);
+     * intent.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION);
+     * activity.finish();
+     * activity.overridePendingTransition(0, 0);
+     * activity.startActivity(intent);
+     * activity.overridePendingTransition(0, 0);
+     * }
+     **/
+
+    public static Languages getLanguages(Activity activity) {
+        return Languages.get(activity);
+    }
 
     @Override
     public void onCreate() {
         super.onCreate();
 
         /**
-        Languages.setup(OrbotMainActivity.class, R.string.menu_settings);
-        Languages.setLanguage(this, Prefs.getDefaultLocale(), true);
+         Languages.setup(OrbotMainActivity.class, R.string.menu_settings);
+         Languages.setLanguage(this, Prefs.getDefaultLocale(), true);
          **/
         Language.setFromPreference(this, "pref_default_locale");
 
@@ -69,28 +75,11 @@ public class OrbotApp extends Application implements OrbotConstants
         Language.setFromPreference(this, "pref_default_locale");
 
         //Log.i(TAG, "onConfigurationChanged " + newConfig.locale.getLanguage());
-    //    Languages.setLanguage(this, Prefs.getDefaultLocale(), true);
+        //    Languages.setLanguage(this, Prefs.getDefaultLocale(), true);
     }
-	/**
-    public static void forceChangeLanguage(Activity activity) {
-        Intent intent = activity.getIntent();
-        if (intent == null) // when launched as LAUNCHER
-            intent = new Intent(activity, OrbotMainActivity.class);
-        intent.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION);
-        activity.finish();
-        activity.overridePendingTransition(0, 0);
-        activity.startActivity(intent);
-        activity.overridePendingTransition(0, 0);
-    }**/
-
-    public static Languages getLanguages(Activity activity) {
-        return Languages.get(activity);
-    }
-
 
     @SuppressLint("NewApi")
-    protected void showToolbarNotification (String shortMsg, String notifyMsg, int notifyId, int icon)
-    {
+    protected void showToolbarNotification(String shortMsg, String notifyMsg, int notifyId, int icon) {
 
         NotificationCompat.Builder notifyBuilder;
 
@@ -119,6 +108,5 @@ public class OrbotApp extends Application implements OrbotConstants
         Notification notification = notifyBuilder.build();
 
         notificationManager.notify(notifyId, notification);
-            }
-
+    }
 }

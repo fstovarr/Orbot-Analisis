@@ -7,7 +7,6 @@ import android.content.SharedPreferences;
 import java.util.Locale;
 
 public class Prefs {
-
     private final static String PREF_BRIDGES_ENABLED = "pref_bridges_enabled";
     private final static String PREF_BRIDGES_LIST = "pref_bridges_list";
     private final static String PREF_DEFAULT_LOCALE = "pref_default_locale";

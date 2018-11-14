@@ -2,7 +2,7 @@ apply plugin: 'com.android.application'
 
 android {
     compileSdkVersion 27
-    buildToolsVersion '27.0.3'
+    buildToolsVersion '28.0.3'
     defaultConfig {
         applicationId "org.torproject.android"
         minSdkVersion 16
@@ -41,10 +41,8 @@ android {
     }
 
     splits {
-
         // Configures multiple APKs based on ABI. This helps keep the size down, since PT binaries can be large.
         abi {
-
             // Enables building multiple APKs per ABI.
             enable true
 
@@ -60,11 +58,15 @@ android {
             // Specifies that we do not want to also generate a universal APK that includes all ABIs.
             universalApk true
         }
-
-
     }
-
 }
+
+repositories {
+    mavenCentral()
+}
+
+apply plugin: 'com.android.application'
+apply plugin: 'newrelic'
 
 dependencies {
     implementation 'com.github.delight-im:Android-Languages:v1.0.1'
@@ -74,5 +76,5 @@ dependencies {
     implementation 'pl.bclogic:pulsator4droid:1.0.3'
     implementation 'com.github.apl-devs:appintro:v4.2.2'
     implementation 'com.github.javiersantos:AppUpdater:2.6.4'
-
+    implementation "com.newrelic.agent.android:android-agent:5.+"
 }
