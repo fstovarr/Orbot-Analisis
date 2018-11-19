@@ -304,17 +304,11 @@ public class OrbotMainActivity extends AppCompatActivity
         boolean showFirstTime = mPrefs.getBoolean("connect_first_time", true);
 
         if (showFirstTime) {
-            Editor pEdit = mPrefs.edit();
-            pEdit.putBoolean("connect_first_time", false);
-            pEdit.commit();
             startActivity(new Intent(this, OnboardingActivity.class));
         }
-
-
     }
 
     private void sendIntentToService(final String action) {
-
         Intent torService = new Intent(OrbotMainActivity.this, TorService.class);
         torService.setAction(action);
         startService(torService);
@@ -322,16 +316,13 @@ public class OrbotMainActivity extends AppCompatActivity
     }
 
     private void stopTor() {
-
 //        requestTorStatus();
-
         Intent torService = new Intent(OrbotMainActivity.this, TorService.class);
         stopService(torService);
-
     }
 
     private void doLayout() {
-        setContentView(R.layout.layout_main);
+        setContentView(R.layout.layout_main_optimized);
 
         setTitle(R.string.app_name);
 
@@ -1083,7 +1074,6 @@ public class OrbotMainActivity extends AppCompatActivity
             }
 
             mTxtOrbotLog.append(torServiceMsg + '\n');
-
         }
 
         if (torStatus == null || newTorStatus.equals(torStatus)) {
